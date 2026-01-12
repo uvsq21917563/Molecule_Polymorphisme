@@ -37,7 +37,7 @@ def parse_mol(filename):
 
 def write_dreadnaut(mol_filename):
     """
-    Génère un fichier .dre valide pour nauty.
+    Génère un fichier .dre valide pour nauty/dretog.
     """
     if not os.path.exists(mol_filename):
         print(f"Erreur : {mol_filename} introuvable.")
@@ -52,25 +52,25 @@ def write_dreadnaut(mol_filename):
 
     num_atoms = len(atoms)
 
+    # Construire la liste des voisins
     neighbors = [[] for _ in range(num_atoms)]
     for a1, a2, _ in bonds:
         neighbors[a1 - 1].append(a2 - 1)
         neighbors[a2 - 1].append(a1 - 1)
 
+    # Écriture du fichier .dre
     with open(dre_filename, "w") as f:
-        f.write(f"n={num_atoms} g\n")
+        f.write(f"n={num_atoms}\n")
+        f.write("g\n")
         
         for i, nbrs in enumerate(neighbors):
             nbrs_str = " ".join(str(n) for n in sorted(nbrs))
-            f.write(f"{i}: {nbrs_str};\n")
-        f.write(".\n") 
+            f.write(f"{i}: {nbrs_str}\n")
         
-        f.write("x\n") # Calculer
-        f.write("b\n") # Afficher le résultat canonique (chiffres)
-        f.write("q\n") # Quitter
+        f.write(".\n")  # Fin du fichier
 
     print(f"Fichier généré : {dre_filename}")
 
-#----Exemple----#
-write_dreadnaut("CHEBI_16236.mol")
-write_dreadnaut("CHEBI_27732.mol")
+# ---- Exemple ---- #
+write_dreadnaut("CHEBI_16040.mol")
+write_dreadnaut("CHEBI_55502.mol")
