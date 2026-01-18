@@ -1,22 +1,31 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Parser SDF → fichiers .mol et .dre pour NAUTY
+
+3 modes :
+1. Tout générer
+2. Générer les x premières molécules
+3. Générer une seule molécule via son ChEBI_ID
+
+Usage :
+    python3 parser.py chemin_fichier.sdf [--all | --first X | --chebi ID]
+"""
+
+import argparse
 import os
 
-def parse_mol(filename):
-    with open(filename, "r") as f:
-        lines = f.readlines()
-
+# ------------------------- Parser MOL ------------------------- #
+def parse_mol_lines(lines):
+    """Parse les lignes d'une molécule MOL et retourne atoms et bonds"""
     counts_line = lines[3].strip()
-    if not counts_line:
-        return [], []
-        
-    try:
-        num_atoms = int(counts_line[0:3].strip())
-        num_bonds = int(counts_line[3:6].strip())
-    except ValueError:
-        return [], []
+    num_atoms = int(counts_line[0:3])
+    num_bonds = int(counts_line[3:6])
 
     atoms = []
     bonds = []
 
+    # Atom block
     atom_start = 4
     atom_end = atom_start + num_atoms
     for i in range(atom_start, atom_end):
@@ -24,6 +33,7 @@ def parse_mol(filename):
         symbol = line[31:34].strip()
         atoms.append(symbol)
 
+    # Bond block
     bond_start = atom_end
     bond_end = bond_start + num_bonds
     for i in range(bond_start, bond_end):
@@ -35,42 +45,102 @@ def parse_mol(filename):
 
     return atoms, bonds
 
-def write_dreadnaut(mol_filename):
-    """
-    Génère un fichier .dre valide pour nauty/dretog.
-    """
-    if not os.path.exists(mol_filename):
-        print(f"Erreur : {mol_filename} introuvable.")
-        return
-
-    dre_filename = mol_filename.rsplit('.', 1)[0] + ".dre"
-    atoms, bonds = parse_mol(mol_filename)
-    
-    if not atoms:
-        print(f"Erreur de lecture pour {mol_filename}")
-        return
-
+# --------------------- Fichier dreadnaut ---------------------- #
+def write_dreadnaut(atoms, bonds, dre_filename):
+    """Écrit un fichier .dre à partir de atoms et bonds"""
     num_atoms = len(atoms)
-
-    # Construire la liste des voisins
     neighbors = [[] for _ in range(num_atoms)]
     for a1, a2, _ in bonds:
         neighbors[a1 - 1].append(a2 - 1)
         neighbors[a2 - 1].append(a1 - 1)
 
-    # Écriture du fichier .dre
     with open(dre_filename, "w") as f:
         f.write(f"n={num_atoms}\n")
         f.write("g\n")
-        
         for i, nbrs in enumerate(neighbors):
             nbrs_str = " ".join(str(n) for n in sorted(nbrs))
-            f.write(f"{i}: {nbrs_str}\n")
-        
-        f.write(".\n")  # Fin du fichier
+            f.write(f"{i}: {nbrs_str};\n")
 
-    print(f"Fichier généré : {dre_filename}")
+# ----------------------- Parcours SDF ------------------------ #
+def process_sdf(sdf_file, mode, param=None):
+    """Parcours un fichier SDF et génère les fichiers .mol et .dre selon mode"""
+    if not os.path.exists(sdf_file):
+        print(f"Erreur : {sdf_file} introuvable")
+        return
 
-# ---- Exemple ---- #
-write_dreadnaut("CHEBI_16040.mol")
-write_dreadnaut("CHEBI_55502.mol")
+    mol_lines = []
+    count = 0
+    found = False
+
+    with open(sdf_file, "r") as f:
+        for line in f:
+            mol_lines.append(line)
+            if line.strip() == "$$$$":
+                count += 1
+                # Récupère le ChEBI_ID
+                chebi_id_line = [l for l in mol_lines if "CHEBI:" in l]
+                chebi_id = None
+                if chebi_id_line:
+                    chebi_id = chebi_id_line[0].strip().split(":")[-1]
+
+                # ---------------- Mode 1 : Tout ---------------- #
+                if mode == "all":
+                    if chebi_id:
+                        mol_filename = f"CHEBI_{chebi_id}.mol"
+                        dre_filename = f"CHEBI_{chebi_id}.dre"
+                        with open(mol_filename, "w") as mf:
+                            mf.writelines(mol_lines)
+                        atoms, bonds = parse_mol_lines(mol_lines)
+                        write_dreadnaut(atoms, bonds, dre_filename)
+                        print(f"[{count}] {mol_filename} / {dre_filename} généré")
+
+                # ---------------- Mode 2 : premières X ---------------- #
+                elif mode == "first":
+                    if count <= param:
+                        if chebi_id:
+                            mol_filename = f"CHEBI_{chebi_id}.mol"
+                            dre_filename = f"CHEBI_{chebi_id}.dre"
+                            with open(mol_filename, "w") as mf:
+                                mf.writelines(mol_lines)
+                            atoms, bonds = parse_mol_lines(mol_lines)
+                            write_dreadnaut(atoms, bonds, dre_filename)
+                            print(f"[{count}] {mol_filename} / {dre_filename} généré")
+
+                # ---------------- Mode 3 : ChEBI_ID ---------------- #
+                elif mode == "chebi":
+                    if chebi_id == str(param):
+                        mol_filename = f"CHEBI_{chebi_id}.mol"
+                        dre_filename = f"CHEBI_{chebi_id}.dre"
+                        with open(mol_filename, "w") as mf:
+                            mf.writelines(mol_lines)
+                        atoms, bonds = parse_mol_lines(mol_lines)
+                        write_dreadnaut(atoms, bonds, dre_filename)
+                        print(f"CHEBI_{chebi_id} généré")
+                        found = True
+                        break  # on a trouvé la mol
+
+                # Reset pour prochaine molécule
+                mol_lines = []
+
+    if mode == "chebi" and not found:
+        print(f"CHEBI:{param} non trouvé dans {sdf_file}")
+
+# -------------------------- Main ---------------------------- #
+def main():
+    parser = argparse.ArgumentParser(description="Parser SDF → fichiers MOL et DRE")
+    parser.add_argument("sdf_file", help="Chemin du fichier SDF")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--all", action="store_true", help="Générer toutes les molécules")
+    group.add_argument("--first", type=int, help="Générer les X premières molécules")
+    group.add_argument("--chebi", type=int, help="Générer une seule molécule avec son ChEBI_ID")
+    args = parser.parse_args()
+
+    if args.all:
+        process_sdf(args.sdf_file, "all")
+    elif args.first:
+        process_sdf(args.sdf_file, "first", args.first)
+    elif args.chebi:
+        process_sdf(args.sdf_file, "chebi", args.chebi)
+
+if __name__ == "__main__":
+    main()
