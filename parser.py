@@ -15,6 +15,15 @@ Usage :
 import argparse
 import os
 
+ATOM_TYPES = {}      # symbole chimique-> id de partition
+BOND_TYPES = {       # MOL bond type -> label
+    1: "SINGLE",
+    2: "DOUBLE",
+    3: "TRIPLE",
+    4: "AROM"
+}
+
+
 # ------------------------- Parser MOL ------------------------- #
 def parse_mol_lines(lines):
     """Parse les lignes d'une molécule MOL et retourne atoms et bonds"""
@@ -47,19 +56,60 @@ def parse_mol_lines(lines):
 
 # --------------------- Fichier dreadnaut ---------------------- #
 def write_dreadnaut(atoms, bonds, dre_filename):
-    """Écrit un fichier .dre à partir de atoms et bonds"""
-    num_atoms = len(atoms)
-    neighbors = [[] for _ in range(num_atoms)]
-    for a1, a2, _ in bonds:
-        neighbors[a1 - 1].append(a2 - 1)
-        neighbors[a2 - 1].append(a1 - 1)
+    """
+    Graphe biparti :
+    - sommets 0..A-1 : atomes
+    - sommets A..A+B-1 : liaisons
+    """
 
+    atom_count = len(atoms)
+    bond_count = len(bonds)
+    total_vertices = atom_count + bond_count
+
+    neighbors = [[] for _ in range(total_vertices)]
+
+    atom_labels = []
+    bond_labels = []
+
+    # --- Labels atomes ---
+    for sym in atoms:
+        atom_labels.append(sym)
+
+    # --- Sommets liaisons ---
+    for i, (a1, a2, bond_type) in enumerate(bonds):
+        bond_vertex = atom_count + i
+        a1 -= 1
+        a2 -= 1
+
+        neighbors[a1].append(bond_vertex)
+        neighbors[a2].append(bond_vertex)
+        neighbors[bond_vertex].extend([a1, a2])
+
+        bond_labels.append(BOND_TYPES.get(bond_type, "SINGLE"))
+
+    # --- Construire partitions ---
+    partitions = {}
+
+    for i, label in enumerate(atom_labels + bond_labels):
+        partitions.setdefault(label, []).append(i)
+
+    # --- Écriture .dre ---
     with open(dre_filename, "w") as f:
-        f.write(f"n={num_atoms}\n")
+        f.write(f"n={total_vertices}\n")
         f.write("g\n")
         for i, nbrs in enumerate(neighbors):
-            nbrs_str = " ".join(str(n) for n in sorted(nbrs))
-            f.write(f"{i}: {nbrs_str};\n")
+            f.write(f"{i}: {' '.join(map(str, sorted(nbrs)))};\n")
+        f.write(".\n")
+
+        # Partitions (labels)
+        f.write("c\n")
+        blocks = []
+        for block in partitions.values():
+            blocks.append(" ".join(map(str, block)))
+        f.write(" | ".join(blocks) + "\n")
+
+        f.write("q\n")
+
 
 # ----------------------- Parcours SDF ------------------------ #
 def process_sdf(sdf_file, mode, param=None):
